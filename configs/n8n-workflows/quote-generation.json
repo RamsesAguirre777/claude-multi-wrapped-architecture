@@ -1,0 +1,198 @@
+{
+  "name": "Generate Quote - Claude Multi-Wrapped",
+  "nodes": [
+    {
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [240, 300],
+      "parameters": {
+        "path": "generate-quote",
+        "httpMethod": "POST",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "parse-quote-request",
+      "name": "Parse Quote Request",
+      "type": "n8n-nodes-base.code",
+      "position": [460, 300],
+      "parameters": {
+        "jsCode": "// Parse incoming quote request\nconst request = $input.first().json;\n\n// Extract service type from message\nconst serviceKeywords = {\n  'limpieza': { type: 'routine', service: 'Limpieza dental completa' },\n  'ortodoncia': { type: 'orthodontics', service: 'Tratamiento ortodoncia completa' },\n  'brackets': { type: 'orthodontics', service: 'Tratamiento ortodoncia completa' },\n  'implante': { type: 'implants', service: 'Implante dental completo' },\n  'conducto': { type: 'endodontics', service: 'Tratamiento de conducto' },\n  'endodoncia': { type: 'endodontics', service: 'Tratamiento de conducto' },\n  'blanqueamiento': { type: 'cosmetic', service: 'Blanqueamiento dental' },\n  'carillas': { type: 'cosmetic', service: 'Carillas dentales' },\n  'extracción': { type: 'surgery', service: 'Extracción simple' },\n  'cirugía': { type: 'surgery', service: 'Extracción quirúrgica' },\n  'emergencia': { type: 'emergency', service: 'Consulta de emergencia' },\n  'revisión': { type: 'routine', service: 'Revisión general' },\n  'consulta': { type: 'routine', service: 'Revisión general' }\n};\n\n// Default service\nlet detectedService = { type: 'routine', service: 'Revisión general' };\n\n// Find matching service\nfor (const [keyword, service] of Object.entries(serviceKeywords)) {\n  if (request.message.toLowerCase().includes(keyword)) {\n    detectedService = service;\n    break;\n  }\n}\n\n// Generate client ID\nconst clientId = request.client_id || `whatsapp_${request.phone}_${Date.now()}`;\n\nreturn {\n  client_id: clientId,\n  phone: request.phone,\n  name: request.name || 'Cliente WhatsApp',\n  message: request.message,\n  service_type: detectedService.type,\n  service_name: detectedService.service,\n  industry: 'dental_clinic',\n  timestamp: new Date().toISOString(),\n  trigger_name: 'consulta_precios'\n};"
+      }
+    },
+    {
+      "id": "get-service-price",
+      "name": "Get Service Price",
+      "type": "n8n-nodes-base.mysql",
+      "position": [680, 300],
+      "parameters": {
+        "operation": "select",
+        "table": "service_prices",
+        "where": {
+          "industry": "dental_clinic",
+          "service_type": "={{$json.service_type}}",
+          "service_name": "={{$json.service_name}}",
+          "active": true
+        },
+        "sort": {
+          "field": "created_at",
+          "direction": "DESC"
+        },
+        "limit": 1
+      }
+    },
+    {
+      "id": "create-quote",
+      "name": "Create Quote",
+      "type": "n8n-nodes-base.code",
+      "position": [900, 300],
+      "parameters": {
+        "jsCode": "// Get service price from database\nconst serviceData = $('get-service-price').first().json;\nconst requestData = $('parse-quote-request').first().json;\n\n// Handle case where service is not found\nif (!serviceData || serviceData.length === 0) {\n  return {\n    error: 'Service not found',\n    service_type: requestData.service_type,\n    service_name: requestData.service_name\n  };\n}\n\nconst service = serviceData[0];\n\n// Generate quote ID\nconst quoteId = `QUOTE_${Date.now()}`;\n\n// Calculate additional services based on main service\nlet additionalServices = [];\nlet totalPrice = service.base_price;\n\nswitch (service.service_type) {\n  case 'orthodontics':\n    additionalServices = [\n      { name: 'Consulta ortodoncia', price: 800 },\n      { name: 'Radiografías', price: 500 },\n      { name: 'Retenedores', price: 4500 }\n    ];\n    break;\n  case 'implants':\n    additionalServices = [\n      { name: 'Consulta implantes', price: 1000 },\n      { name: 'Tomografía', price: 1200 },\n      { name: 'Cirugía implante', price: 8000 }\n    ];\n    break;\n  case 'routine':\n    additionalServices = [\n      { name: 'Aplicación de flúor', price: 300 },\n      { name: 'Selladores (opcional)', price: 800 }\n    ];\n    break;\n  case 'cosmetic':\n    if (service.service_name.includes('blanqueamiento')) {\n      additionalServices = [\n        { name: 'Kit mantenimiento', price: 1200 },\n        { name: 'Sesión adicional', price: 1500 }\n      ];\n    }\n    break;\n}\n\n// Calculate total with additional services\nconst additionalTotal = additionalServices.reduce((sum, item) => sum + item.price, 0);\nconst grandTotal = totalPrice + additionalTotal;\n\n// Payment options\nconst paymentOptions = [\n  { type: 'cash', discount: 0.05, description: 'Pago de contado - 5% descuento' },\n  { type: '3_months', interest: 0, description: '3 meses sin intereses' },\n  { type: '6_months', interest: 0, description: '6 meses sin intereses' },\n  { type: '12_months', interest: 0.08, description: '12 meses - 8% interés anual' }\n];\n\n// Generate quote data\nconst quote = {\n  quote_id: quoteId,\n  client_id: requestData.client_id,\n  client_name: requestData.name,\n  client_phone: requestData.phone,\n  service_type: service.service_type,\n  service_name: service.service_name,\n  base_price: service.base_price,\n  duration_minutes: service.duration_minutes,\n  description: service.description,\n  additional_services: additionalServices,\n  subtotal: totalPrice,\n  additional_total: additionalTotal,\n  grand_total: grandTotal,\n  currency: service.currency || 'MXN',\n  payment_options: paymentOptions,\n  valid_until: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 7 days from now\n  created_at: new Date().toISOString(),\n  industry: 'dental_clinic'\n};\n\nreturn quote;"
+      }
+    },
+    {
+      "id": "send-whatsapp-quote",
+      "name": "Send WhatsApp Quote",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1120, 300],
+      "parameters": {
+        "url": "https://api.whatsapp.com/send",
+        "method": "POST",
+        "headers": {
+          "Authorization": "Bearer {{$env.WHATSAPP_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "messaging_product": "whatsapp",
+          "to": "{{$json.client_phone}}",
+          "type": "text",
+          "text": {
+            "body": "📋 **COTIZACIÓN DENTAL** 📋\n\n👋 Hola {{$json.client_name}}!\n\n🦷 **Servicio:** {{$json.service_name}}\n💰 **Precio:** ${{$json.base_price}} {{$json.currency}}\n⏱️ **Duración:** {{$json.duration_minutes}} minutos\n\n✨ **Servicios adicionales incluidos:**\n{{$json.additional_services.map(s => `• ${s.name}: $${s.price}`).join('\\n')}}\n\n💳 **TOTAL: ${{$json.grand_total}} {{$json.currency}}**\n\n🏦 **Opciones de pago:**\n• Pago de contado - 5% descuento\n• 3 meses sin intereses\n• 6 meses sin intereses\n• 12 meses con interés\n\n📅 **Válida hasta:** {{new Date($json.valid_until).toLocaleDateString('es-MX')}}\n\n¿Te gustaría agendar una consulta para comenzar el tratamiento?\n\n📞 Clínica Sonrisa Perfecta\n🏥 Tu salud dental es nuestra prioridad"
+          }
+        }
+      }
+    },
+    {
+      "id": "log-quote-generation",
+      "name": "Log Quote Generation",
+      "type": "n8n-nodes-base.mysql",
+      "position": [1340, 300],
+      "parameters": {
+        "operation": "insert",
+        "table": "trigger_logs",
+        "columns": "trigger_name, client_id, client_phone, message, actions_executed, execution_time, success, industry, source",
+        "values": "={{$json.trigger_name}}, {{$json.client_id}}, {{$json.client_phone}}, {{$('parse-quote-request').first().json.message}}, {{JSON.stringify(['generate_quote', 'send_whatsapp', 'update_crm'])}}, {{$json.timestamp}}, true, {{$json.industry}}, whatsapp"
+      }
+    },
+    {
+      "id": "response",
+      "name": "Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [1560, 300],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": {
+          "success": true,
+          "message": "Cotización generada y enviada exitosamente",
+          "quote": {
+            "quote_id": "{{$json.quote_id}}",
+            "service_name": "{{$json.service_name}}",
+            "total": "{{$json.grand_total}}",
+            "currency": "{{$json.currency}}",
+            "valid_until": "{{$json.valid_until}}"
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "webhook-trigger": {
+      "main": [
+        [
+          {
+            "node": "parse-quote-request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "parse-quote-request": {
+      "main": [
+        [
+          {
+            "node": "get-service-price",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get-service-price": {
+      "main": [
+        [
+          {
+            "node": "create-quote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "create-quote": {
+      "main": [
+        [
+          {
+            "node": "send-whatsapp-quote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "send-whatsapp-quote": {
+      "main": [
+        [
+          {
+            "node": "log-quote-generation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "log-quote-generation": {
+      "main": [
+        [
+          {
+            "node": "response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "instanceId": "claude-multi-wrapped-quote-generator"
+  },
+  "pinData": null,
+  "versionId": "1.0.0",
+  "triggerCount": 1,
+  "tags": [
+    {
+      "id": "quote-generation",
+      "name": "Quote Generation"
+    },
+    {
+      "id": "claude-multi-wrapped",
+      "name": "Claude Multi-Wrapped"
+    }
+  ]
+}
