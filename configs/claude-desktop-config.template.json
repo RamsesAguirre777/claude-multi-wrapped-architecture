@@ -1,0 +1,52 @@
+{
+  "mcpServers": {
+    "odoo": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-odoo", "--host", "YOUR_ODOO_HOST", "--port", "8069", "--database", "YOUR_ODOO_DB", "--user", "YOUR_ODOO_USER", "--password", "YOUR_ODOO_PASSWORD"]
+    },
+    "mysql": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-mysql", "--host", "YOUR_MYSQL_HOST", "--port", "3306", "--user", "YOUR_MYSQL_USER", "--password", "YOUR_MYSQL_PASSWORD", "--database", "YOUR_MYSQL_DATABASE"]
+    },
+    "chroma": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-chroma", "--host", "YOUR_CHROMA_HOST", "--port", "8000"]
+    },
+    "flowise": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-flowise", "--host", "YOUR_FLOWISE_HOST", "--port", "3000"]
+    },
+    "n8n-glyver": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-n8n", "--host", "YOUR_N8N_HOST", "--port", "5678"]
+    },
+    "whatsapp": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-whatsapp", "--api-key", "YOUR_WHATSAPP_API_KEY"]
+    },
+    "calendar": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-calendar", "--provider", "google", "--credentials", "YOUR_GOOGLE_CREDENTIALS"]
+    },
+    "linkedin": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-linkedin", "--session-cookie", "YOUR_LINKEDIN_SESSION"]
+    },
+    "github": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-github", "--token", "YOUR_GITHUB_TOKEN"]
+    },
+    "notion": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-notion", "--token", "YOUR_NOTION_TOKEN"]
+    },
+    "wordpress": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-wordpress", "--url", "YOUR_WORDPRESS_URL", "--username", "YOUR_WP_USER", "--password", "YOUR_WP_PASSWORD"]
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-filesystem", "--allowed-directories", "/Users/YOUR_USER/Documents/claude-projects"]
+    }
+  }
+}
