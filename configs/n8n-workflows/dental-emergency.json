@@ -1,0 +1,342 @@
+{
+  "name": "Emergencia Dental - Claude Multi-Wrapped",
+  "nodes": [
+    {
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [240, 300],
+      "parameters": {
+        "path": "emergency-dental",
+        "httpMethod": "POST",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "parse-message",
+      "name": "Parse Message",
+      "type": "n8n-nodes-base.code",
+      "position": [460, 300],
+      "parameters": {
+        "jsCode": "// Parse incoming message and extract key information\nconst message = $input.first().json;\n\n// Extract keywords related to dental emergency\nconst keywords = [\n  'dolor', 'terrible', 'muela', 'urgente', 'emergencia', \n  'duele', 'hinchazón', 'infección', 'sangrado', 'golpe'\n];\n\nconst foundKeywords = keywords.filter(keyword => \n  message.text.toLowerCase().includes(keyword)\n);\n\n// Determine urgency level\nlet urgencyLevel = 'medium';\nif (foundKeywords.some(k => ['terrible', 'urgente', 'emergencia', 'infección'].includes(k))) {\n  urgencyLevel = 'critical';\n} else if (foundKeywords.some(k => ['dolor', 'duele', 'hinchazón'].includes(k))) {\n  urgencyLevel = 'high';\n}\n\n// Generate client ID if not present\nconst clientId = message.client_id || `whatsapp_${message.phone}_${Date.now()}`;\n\nreturn {\n  client_id: clientId,\n  phone: message.phone,\n  name: message.name || 'Cliente WhatsApp',\n  message: message.text,\n  keywords: foundKeywords,\n  urgency_level: urgencyLevel,\n  timestamp: new Date().toISOString(),\n  trigger_name: 'emergencia_dental',\n  industry: 'dental_clinic'\n};"
+      }
+    },
+    {
+      "id": "create-odoo-lead",
+      "name": "Create Odoo Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [680, 200],
+      "parameters": {
+        "url": "http://{{$env.ODOO_HOST}}:{{$env.ODOO_PORT}}/web/dataset/call_kw",
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "jsonrpc": "2.0",
+          "method": "call",
+          "params": {
+            "model": "crm.lead",
+            "method": "create",
+            "args": [
+              {
+                "name": "EMERGENCIA: {{$json.message}}",
+                "partner_name": "{{$json.name}}",
+                "phone": "{{$json.phone}}",
+                "stage_id": 6,
+                "priority": "high",
+                "description": "Emergencia dental - Keywords: {{$json.keywords.join(', ')}}",
+                "source_id": 1,
+                "team_id": 1,
+                "tag_ids": [[6, false, [1]]]
+              }
+            ],
+            "kwargs": {}
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth"
+      }
+    },
+    {
+      "id": "log-trigger",
+      "name": "Log Trigger Execution",
+      "type": "n8n-nodes-base.mysql",
+      "position": [680, 400],
+      "parameters": {
+        "operation": "insert",
+        "table": "trigger_logs",
+        "columns": "trigger_name, client_id, client_phone, message, keywords_matched, actions_executed, execution_time, success, industry, source",
+        "values": "={{$json.trigger_name}}, {{$json.client_id}}, {{$json.phone}}, {{$json.message}}, {{JSON.stringify($json.keywords)}}, {{JSON.stringify(['create_odoo_lead', 'schedule_emergency', 'send_whatsapp'])}}, {{$json.timestamp}}, true, {{$json.industry}}, whatsapp"
+      }
+    },
+    {
+      "id": "schedule-appointment",
+      "name": "Schedule Emergency Appointment",
+      "type": "n8n-nodes-base.code",
+      "position": [900, 200],
+      "parameters": {
+        "jsCode": "// Calculate emergency appointment time (next 30 minutes)\nconst now = new Date();\nconst appointmentTime = new Date(now.getTime() + 30 * 60000); // 30 minutes from now\n\n// Format date for MySQL\nconst formatDate = (date) => {\n  return date.toISOString().slice(0, 19).replace('T', ' ');\n};\n\n// Determine available doctor for emergency\nconst doctors = ['Dr. García', 'Dr. Sánchez', 'Dr. López'];\nconst assignedDoctor = doctors[Math.floor(Math.random() * doctors.length)];\n\nreturn {\n  client_id: $json.client_id,\n  lead_id: $('create-odoo-lead').first().json.result,\n  appointment_date: formatDate(appointmentTime),\n  service_type: 'emergency',\n  service_name: 'Consulta de emergencia',\n  duration_minutes: 30,\n  status: 'scheduled',\n  doctor_name: assignedDoctor,\n  price: 800.00,\n  notes: `Emergencia dental - ${$json.urgency_level} urgency`,\n  formatted_time: appointmentTime.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),\n  formatted_date: appointmentTime.toLocaleDateString('es-MX', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })\n};"
+      }
+    },
+    {
+      "id": "save-appointment",
+      "name": "Save Appointment",
+      "type": "n8n-nodes-base.mysql",
+      "position": [1120, 200],
+      "parameters": {
+        "operation": "insert",
+        "table": "appointments",
+        "columns": "client_id, lead_id, appointment_date, service_type, service_name, duration_minutes, status, doctor_name, price, notes",
+        "values": "={{$json.client_id}}, {{$json.lead_id}}, {{$json.appointment_date}}, {{$json.service_type}}, {{$json.service_name}}, {{$json.duration_minutes}}, {{$json.status}}, {{$json.doctor_name}}, {{$json.price}}, {{$json.notes}}"
+      }
+    },
+    {
+      "id": "send-whatsapp",
+      "name": "Send WhatsApp Confirmation",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [900, 400],
+      "parameters": {
+        "url": "https://api.whatsapp.com/send",
+        "method": "POST",
+        "headers": {
+          "Authorization": "Bearer {{$env.WHATSAPP_TOKEN}}",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "messaging_product": "whatsapp",
+          "to": "{{$json.phone}}",
+          "type": "template",
+          "template": {
+            "name": "emergency_confirmation",
+            "language": {
+              "code": "es_MX"
+            },
+            "components": [
+              {
+                "type": "body",
+                "parameters": [
+                  {
+                    "type": "text",
+                    "text": "{{$('schedule-appointment').first().json.formatted_date}}"
+                  },
+                  {
+                    "type": "text",
+                    "text": "{{$('schedule-appointment').first().json.formatted_time}}"
+                  },
+                  {
+                    "type": "text",
+                    "text": "{{$('schedule-appointment').first().json.doctor_name}}"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "notify-team",
+      "name": "Notify Medical Team",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1120, 400],
+      "parameters": {
+        "url": "https://hooks.slack.com/services/YOUR_SLACK_WEBHOOK",
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "text": "🚨 EMERGENCIA DENTAL 🚨",
+          "attachments": [
+            {
+              "color": "danger",
+              "fields": [
+                {
+                  "title": "Paciente",
+                  "value": "{{$json.name}} - {{$json.phone}}",
+                  "short": true
+                },
+                {
+                  "title": "Síntomas",
+                  "value": "{{$json.keywords.join(', ')}}",
+                  "short": true
+                },
+                {
+                  "title": "Urgencia",
+                  "value": "{{$json.urgency_level}}",
+                  "short": true
+                },
+                {
+                  "title": "Doctor asignado",
+                  "value": "{{$('schedule-appointment').first().json.doctor_name}}",
+                  "short": true
+                },
+                {
+                  "title": "Cita programada",
+                  "value": "{{$('schedule-appointment').first().json.formatted_date}} a las {{$('schedule-appointment').first().json.formatted_time}}",
+                  "short": false
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "log-conversation",
+      "name": "Log Conversation",
+      "type": "n8n-nodes-base.mysql",
+      "position": [1340, 300],
+      "parameters": {
+        "operation": "insert",
+        "table": "conversations",
+        "columns": "client_id, client_phone, client_name, message, response, timestamp, industry, trigger_activated, lead_id, urgency_level, source",
+        "values": "={{$json.client_id}}, {{$json.phone}}, {{$json.name}}, {{$json.message}}, Cita de emergencia programada para {{$('schedule-appointment').first().json.formatted_date}} a las {{$('schedule-appointment').first().json.formatted_time}}, {{$json.timestamp}}, {{$json.industry}}, {{$json.trigger_name}}, {{$('create-odoo-lead').first().json.result}}, {{$json.urgency_level}}, whatsapp"
+      }
+    },
+    {
+      "id": "response",
+      "name": "Response to Client",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [1560, 300],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": {
+          "success": true,
+          "message": "Emergencia dental procesada exitosamente",
+          "appointment": {
+            "date": "{{$('schedule-appointment').first().json.formatted_date}}",
+            "time": "{{$('schedule-appointment').first().json.formatted_time}}",
+            "doctor": "{{$('schedule-appointment').first().json.doctor_name}}",
+            "service": "{{$('schedule-appointment').first().json.service_name}}",
+            "price": "{{$('schedule-appointment').first().json.price}}"
+          },
+          "lead_id": "{{$('create-odoo-lead').first().json.result}}",
+          "urgency_level": "{{$json.urgency_level}}"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "webhook-trigger": {
+      "main": [
+        [
+          {
+            "node": "parse-message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "parse-message": {
+      "main": [
+        [
+          {
+            "node": "create-odoo-lead",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "log-trigger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "create-odoo-lead": {
+      "main": [
+        [
+          {
+            "node": "schedule-appointment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "schedule-appointment": {
+      "main": [
+        [
+          {
+            "node": "save-appointment",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "send-whatsapp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "save-appointment": {
+      "main": [
+        [
+          {
+            "node": "log-conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "send-whatsapp": {
+      "main": [
+        [
+          {
+            "node": "notify-team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "notify-team": {
+      "main": [
+        [
+          {
+            "node": "log-conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "log-conversation": {
+      "main": [
+        [
+          {
+            "node": "response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "instanceId": "claude-multi-wrapped-dental-emergency"
+  },
+  "pinData": null,
+  "versionId": "1.0.0",
+  "triggerCount": 1,
+  "tags": [
+    {
+      "id": "dental-emergency",
+      "name": "Dental Emergency"
+    },
+    {
+      "id": "claude-multi-wrapped",
+      "name": "Claude Multi-Wrapped"
+    }
+  ]
+}
